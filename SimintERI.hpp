@@ -7,11 +7,13 @@
 class SimintERI : public pulsar::modulebase::TwoElectronIntegral
 {
 public:
-    SimintERI(ID_t id);
+    using pulsar::modulebase::TwoElectronIntegral::TwoElectronIntegral;
 
-    virtual void SetBases_(const pulsar::system::System & sys,
-                           const std::string & bs1, const std::string & bs2,
-                           const std::string & bs3, const std::string & bs4);
+    virtual void SetBases_(const pulsar::datastore::Wavefunction & wfn,
+                           const pulsar::system::BasisSet & bs1,
+                           const pulsar::system::BasisSet & bs2,
+                           const pulsar::system::BasisSet & bs3,
+                           const pulsar::system::BasisSet & bs4);
 
 
     virtual uint64_t Calculate_(size_t deriv,
@@ -19,11 +21,8 @@ public:
                                 size_t shell3, size_t shell4,
                                 double * outbuffer, size_t bufsize);
 
-    virtual ~SimintERI();
-
-
 private:
-    std::shared_ptr<pulsar::system::BasisSet> bs1_, bs2_, bs3_, bs4_;
+    pulsar::system::BasisSet bs1_, bs2_, bs3_, bs4_;
 
     std::vector<double> work_;
     double * sourcework_;

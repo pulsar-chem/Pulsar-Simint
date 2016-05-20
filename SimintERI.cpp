@@ -11,17 +11,7 @@
 using namespace pulsar::output;
 using namespace pulsar::exception;
 using namespace pulsar::system;
-
-
-
-SimintERI::SimintERI(ID_t id)
-    : TwoElectronIntegral(id)
-{ }
-
-
-
-SimintERI::~SimintERI()
-{ }
+using namespace pulsar::datastore;
 
 
 
@@ -57,10 +47,10 @@ uint64_t SimintERI::Calculate_(size_t deriv,
     if(deriv != 0)
         throw NotYetImplementedException("Not Yet Implemented: Overlap integral with deriv != 0");
 
-    const BasisSetShell & sh1 = bs1_->Shell(shell1);
-    const BasisSetShell & sh2 = bs2_->Shell(shell2);
-    const BasisSetShell & sh3 = bs3_->Shell(shell3);
-    const BasisSetShell & sh4 = bs4_->Shell(shell4);
+    const BasisSetShell & sh1 = bs1_.Shell(shell1);
+    const BasisSetShell & sh2 = bs2_.Shell(shell2);
+    const BasisSetShell & sh3 = bs3_.Shell(shell3);
+    const BasisSetShell & sh4 = bs4_.Shell(shell4);
 
     size_t nfunc = sh1.NFunctions() * sh2.NFunctions() * sh3.NFunctions() * sh4.NFunctions();
 
@@ -112,38 +102,38 @@ uint64_t SimintERI::Calculate_(size_t deriv,
     }
 
 
-    CartesianToSpherical_4Center(sh1, sh2, sh3, sh4, sourcework_, outbuffer, transformwork_);
+    CartesianToSpherical_4Center(sh1, sh2, sh3, sh4, sourcework_, outbuffer, transformwork_, 1);
 
     return nfunc;
 }
 
 
-void SimintERI::SetBases_(const System & sys,
-                          const std::string & bs1, const std::string & bs2,
-                          const std::string & bs3, const std::string & bs4)
+void SimintERI::SetBases_(const Wavefunction & wfn,
+                          const BasisSet & bs1, const BasisSet & bs2,
+                          const BasisSet & bs3, const BasisSet & bs4)
 {
     // initialize the simint library
     simint_init();
 
     // get the basis sets from the system
     // Note - storing un-normalized
-    bs1_ = std::make_shared<BasisSet>(sys.GetBasisSet(bs1));
-    bs2_ = std::make_shared<BasisSet>(sys.GetBasisSet(bs2));
-    bs3_ = std::make_shared<BasisSet>(sys.GetBasisSet(bs3));
-    bs4_ = std::make_shared<BasisSet>(sys.GetBasisSet(bs4));
+    bs1_ = bs1;
+    bs2_ = bs2;
+    bs3_ = bs3;
+    bs4_ = bs4;
 
 
     // determine work sizes
-    size_t maxsize1 = bs1_->MaxProperty(NCartesianGaussianForShellAM);
-    size_t maxsize2 = bs2_->MaxProperty(NCartesianGaussianForShellAM);
-    size_t maxsize3 = bs3_->MaxProperty(NCartesianGaussianForShellAM);
-    size_t maxsize4 = bs4_->MaxProperty(NCartesianGaussianForShellAM);
+    size_t maxsize1 = bs1_.MaxProperty(NCartesianGaussianForShellAM);
+    size_t maxsize2 = bs2_.MaxProperty(NCartesianGaussianForShellAM);
+    size_t maxsize3 = bs3_.MaxProperty(NCartesianGaussianForShellAM);
+    size_t maxsize4 = bs4_.MaxProperty(NCartesianGaussianForShellAM);
     size_t transformwork_size = maxsize1*maxsize2*maxsize3*maxsize4;
     
-    maxsize1 =  bs1_->MaxProperty(NCartesianGaussianInShell);
-    maxsize2 =  bs2_->MaxProperty(NCartesianGaussianInShell);
-    maxsize3 =  bs3_->MaxProperty(NCartesianGaussianInShell);
-    maxsize4 =  bs4_->MaxProperty(NCartesianGaussianInShell);
+    maxsize1 =  bs1_.MaxProperty(NCartesianGaussianInShell);
+    maxsize2 =  bs2_.MaxProperty(NCartesianGaussianInShell);
+    maxsize3 =  bs3_.MaxProperty(NCartesianGaussianInShell);
+    maxsize4 =  bs4_.MaxProperty(NCartesianGaussianInShell);
     size_t sourcework_size = maxsize1*maxsize2*maxsize3*maxsize4;
 
     work_.resize(sourcework_size+transformwork_size);
