@@ -9,15 +9,15 @@ class SimintERI : public pulsar::modulebase::TwoElectronIntegral
 public:
     using pulsar::modulebase::TwoElectronIntegral::TwoElectronIntegral;
 
-    virtual void SetBases_(const pulsar::datastore::Wavefunction & wfn,
-                           const pulsar::system::BasisSet & bs1,
-                           const pulsar::system::BasisSet & bs2,
-                           const pulsar::system::BasisSet & bs3,
-                           const pulsar::system::BasisSet & bs4);
+    virtual void Initialize_(unsigned int deriv,
+                             const pulsar::datastore::Wavefunction & wfn,
+                             const pulsar::system::BasisSet & bs1,
+                             const pulsar::system::BasisSet & bs2,
+                             const pulsar::system::BasisSet & bs3,
+                             const pulsar::system::BasisSet & bs4);
 
 
-    virtual uint64_t Calculate_(size_t deriv,
-                                size_t shell1, size_t shell2,
+    virtual uint64_t Calculate_(size_t shell1, size_t shell2,
                                 size_t shell3, size_t shell4,
                                 double * outbuffer, size_t bufsize);
 

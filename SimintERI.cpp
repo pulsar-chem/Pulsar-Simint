@@ -39,14 +39,10 @@ gaussian_shell ToSimintShell(const BasisSetShell & shell, int igen)
 }
 
 
-uint64_t SimintERI::Calculate_(size_t deriv,
-                               size_t shell1, size_t shell2,
+uint64_t SimintERI::Calculate_(size_t shell1, size_t shell2,
                                size_t shell3, size_t shell4,
                                double * outbuffer, size_t bufsize)
 {
-    if(deriv != 0)
-        throw NotYetImplementedException("Not Yet Implemented: Overlap integral with deriv != 0");
-
     const BasisSetShell & sh1 = bs1_.Shell(shell1);
     const BasisSetShell & sh2 = bs2_.Shell(shell2);
     const BasisSetShell & sh3 = bs3_.Shell(shell3);
@@ -108,10 +104,14 @@ uint64_t SimintERI::Calculate_(size_t deriv,
 }
 
 
-void SimintERI::SetBases_(const Wavefunction & wfn,
-                          const BasisSet & bs1, const BasisSet & bs2,
-                          const BasisSet & bs3, const BasisSet & bs4)
+void SimintERI::Initialize_(unsigned int deriv,
+                            const Wavefunction & wfn,
+                            const BasisSet & bs1, const BasisSet & bs2,
+                            const BasisSet & bs3, const BasisSet & bs4)
 {
+    if(deriv != 0)
+        throw NotYetImplementedException("Not Yet Implemented: Simint with deriv != 0");
+
     // initialize the simint library
     simint_init();
 
