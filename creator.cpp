@@ -5,10 +5,10 @@ using pulsar::modulemanager::ModuleCreationFuncs;
 
 extern "C" {
 
-ModuleCreationFuncs InsertSupermodule(void)
+ModuleCreationFuncs insert_supermodule(void)
 {
     ModuleCreationFuncs cf;
-    cf.AddCppCreator<SimintERI>("SimintERI");
+    cf.add_cpp_creator<SimintERI>("SimintERI");
     return cf;
 }
 
