@@ -4,24 +4,18 @@
 
 #include "SimintERI.hpp"
 
-#include "simint/simint_init.h"
-#include "simint/eri/eri.h"
+using namespace pulsar;
 
+using SimintERI::ShellVec;
+using SimintERI::ShellPairVec;
 
-using namespace pulsar::output;
-using namespace pulsar::exception;
-using namespace pulsar::system;
-using namespace pulsar::datastore;
-
-
-
-static
-gaussian_shell ToSimintShell(const BasisSetShell & shell, int igen)
+//Transforms the igen-th general contraction of shell into a simint shell
+static simint_shell psr_to_simint_(const BasisSetShell & shell, size_t igen)
 {
     size_t nprim = shell.n_primitives();
-
-    gaussian_shell gs;
-    allocate_gaussian_shell(nprim, &gs);
+    simint_shell gs;
+    simint_initialize_shell(&gs);
+    simint_allocate_shell(nprim, &gs);
     gs.nprim = nprim;
     gs.am = shell.general_am(igen);
     gs.x = shell.get_coord(0);
@@ -33,111 +27,251 @@ gaussian_shell ToSimintShell(const BasisSetShell & shell, int igen)
     std::copy(alphas, alphas + nprim, gs.alpha);
     std::copy(coefs, coefs + nprim, gs.coef);
 
-    normalize_gaussian_shells(1, &gs);
+    //simint_normalize_shells(1, &gs);
 
     return gs;
 }
 
-
-uint64_t SimintERI::calculate_(size_t shell1, size_t shell2,
-                               size_t shell3, size_t shell4,
-                               double * outbuffer, size_t bufsize)
+static simint_multi_shellpair make_pair_(const simint_shell& si,
+                                         const simint_shell& sj,
+                                         double screen_thresh)
 {
-    const BasisSetShell & sh1 = bs1_.shell(shell1);
-    const BasisSetShell & sh2 = bs2_.shell(shell2);
-    const BasisSetShell & sh3 = bs3_.shell(shell3);
-    const BasisSetShell & sh4 = bs4_.shell(shell4);
-
-    size_t nfunc = sh1.n_functions() * sh2.n_functions() * sh3.n_functions() * sh4.n_functions();
-
-    if(bufsize < nfunc)
-        throw GeneralException("Buffer to small for ERI", "bufsize", bufsize, "nfunc", nfunc);
-
-    double * srcptr = sourcework_;
-
-    for(size_t ng1 = 0; ng1 < sh1.n_general_contractions(); ng1++)
-    {
-        gaussian_shell gs1 = ToSimintShell(sh1, ng1);
-        const size_t ncart1 = n_cartesian_gaussian(sh1.general_am(ng1));
-
-        for(size_t ng2 = 0; ng2 < sh2.n_general_contractions(); ng2++)
-        {
-            gaussian_shell gs2 = ToSimintShell(sh2, ng2);
-            const size_t ncart2 = n_cartesian_gaussian(sh2.general_am(ng2));
-            multishell_pair bra_pair = create_multishell_pair(1, &gs1, 1, &gs2); 
-
-            for(size_t ng3 = 0; ng3 < sh3.n_general_contractions(); ng3++)
-            {
-                gaussian_shell gs3 = ToSimintShell(sh3, ng3);
-                const size_t ncart3 = n_cartesian_gaussian(sh3.general_am(ng3));
-
-                for(size_t ng4 = 0; ng4 < sh4.n_general_contractions(); ng4++)
-                {
-                    // form the shell pair info
-                    gaussian_shell gs4 = ToSimintShell(sh4, ng4);
-                    multishell_pair ket_pair = create_multishell_pair(1, &gs3, 1, &gs4); 
-                    const size_t ncart4 = n_cartesian_gaussian(sh4.general_am(ng4));
-                    const size_t ncart = ncart1 * ncart2 * ncart3 * ncart4;
-
-                    size_t ncalc = simint_compute_eri(bra_pair, ket_pair, srcptr);
-
-                    free_gaussian_shell(gs4);
-                    free_multishell_pair(ket_pair);
-
-                    srcptr += ncalc * ncart;
-                }
-
-                free_gaussian_shell(gs3);
-            }
-
-            free_gaussian_shell(gs2);
-            free_multishell_pair(bra_pair);
-        }
-
-        free_gaussian_shell(gs1);
-    }
-
-
-    CartesianToSpherical_4Center(sh1, sh2, sh3, sh4, sourcework_, outbuffer, transformwork_, 1);
-
-    return nfunc;
+    simint_multi_shellpair da_pair;
+    simint_initialize_multi_shellpair(&da_pair);
+    simint_create_multi_shellpair(1, &si, 1, &sj, &da_pair, screen_thresh);
+    return da_pair;
 }
 
 
+// Some helpers
+static void multishell_vector_deleter_(ShellPairVec * mpv)
+{
+    for(auto & mp : *mpv)
+        simint_free_multi_shellpair(&mp);
+    mpv->clear();
+}
+
+static std::shared_ptr<ShellVec>
+create_shell_vec_(const BasisSet & bs)
+{
+    auto shells = std::shared_ptr<ShellVec>(new ShellVec, [](ShellVec * mpv){
+            for(auto & mp : *mpv)
+            simint_free_shell(&mp);
+            mpv->clear();
+});
+    for(auto sh : bs)
+        for(size_t ng = 0; ng < sh.n_general_contractions(); ng++)
+            shells->push_back(psr_to_simint_(sh, ng));
+    return shells;
+}
+
+static std::shared_ptr<ShellPairVec>
+create_shell_pair_(const ShellVec & bs1, const ShellVec & bs2)
+{
+    auto spairs = std::shared_ptr<ShellPairVec>(new ShellPairVec, &multishell_vector_deleter_);
+
+    size_t nshell1 = bs1.size();
+    size_t nshell2 = bs2.size();
+    spairs->resize(nshell1 * nshell2);
+
+    for(size_t i = 0; i < nshell1; i++)
+    {
+        const simint_shell & sh_i = bs1[i];
+        for(size_t j = 0; j < nshell2; j++)
+        {
+            const simint_shell & sh_j = bs2[j];
+            simint_multi_shellpair P;
+            simint_initialize_multi_shellpair(&P);
+            simint_create_multi_shellpair(1, &sh_i, 1, &sh_j, &P, SIMINT_SCREEN);
+            (*spairs)[i*nshell2+j] = P;
+        }
+    }
+
+    return spairs;
+}
+
+static ShellPairVec
+create_multi_shellpair_(const std::vector<ShellPairBlock> & vsh,
+                        const ShellVec & shell1,
+                        const ShellVec & shell2)
+{
+    ShellPairVec ret;
+
+    // copying simint shells will copy the pointers. That is ok - we won't
+    // do anything special to delete them
+    for(const auto & spairs : vsh)
+    {
+        std::vector<simint_shell> simint_shells;
+
+        for(const auto & s : spairs)
+        {
+            simint_shells.push_back(shell1[s.first]);
+            simint_shells.push_back(shell2[s.second]);
+        }
+
+        // spairs.size() should be simint_shells.size()/2
+        simint_multi_shellpair P;
+        simint_initialize_multi_shellpair(&P);
+        simint_create_multi_shellpair2(spairs.size(), simint_shells.data(), &P, SIMINT_SCREEN);
+        ret.push_back(P);
+    }
+
+    return ret;
+}
+
+static std::shared_ptr<ShellPairVec>
+create_shared_multi_shellpair_(const std::vector<ShellPairBlock> & vsh,
+                               const ShellVec & shell1,
+                               const ShellVec & shell2)
+{
+    auto vec = create_multi_shellpair_(vsh, shell1, shell2);
+    return std::shared_ptr<ShellPairVec>(new ShellPairVec(std::move(vec)));
+}
+
+double *SimintERI::calculate_(size_t shell1, size_t shell2,
+                              size_t shell3, size_t shell4)
+{
+    buffer_ = allwork_;
+    double* source =  source_full_;
+    double* tformbuf =  tformbuf_full_;
+
+    const size_t nsh2 = shells_[1]->size();
+    const size_t nsh4 = shells_[3]->size();
+
+    // get the precomputed simint_multi_shellpair
+    const auto * P = &(*single_spairs_[0])[shell1*nsh2 + shell2];
+    const auto * Q = &(*single_spairs_[1])[shell3*nsh4 + shell4];
+
+    const bool do_cart = false; //TODO:
+
+    // actually compute
+    // if we are doing cartesian, put directly in target. Otherwise, put in source
+    // and let pure_transform put it in target
+    simint_compute_eri(P, Q, SIMINT_SCREEN_TOL, sharedwork_, do_cart ? buffer_ : source);
+    if(do_cart)
+        CartesianToSpherical_4Center(shell1, shell2, shell3, shell4, source, buffer_, tformbuf, 1);
+    return buffer_;
+}
+
+//Returns 3 multichoose l, i.e. the number of Cartesian Gaussians for angular
+//momentum l
+static size_t multichoose(size_t l)
+{
+    if(l==0)return 1;
+    else if(l==1)return 3;
+    else if(l==2)return 6;
+    else if(l==3)return 10;
+    else if(l==4)return 15;
+    else if(l==5)return 21;
+    else if(l==6)return 28;
+    else if(l==7)return 36;
+    else
+        throw PulsarException("Simint only supports up to angular momentum l==7");
+}
+
 void SimintERI::initialize_(unsigned int deriv,
-                            const Wavefunction & wfn,
+                            const Wavefunction &,
                             const BasisSet & bs1, const BasisSet & bs2,
                             const BasisSet & bs3, const BasisSet & bs4)
 {
     if(deriv != 0)
-        throw NotYetImplementedException("Not Yet Implemented: Simint with deriv != 0");
+        throw PulsarException("Not Yet Implemented: Simint with deriv != 0");
+
+    // get the basis sets from the system
+    // Note - storing un-normalized
+    bs_[0]=bs1; bs_[1]=bs2; bs_[2]=bs3; bs_[3]=bs4;
 
     // initialize the simint library
     simint_init();
 
-    // get the basis sets from the system
-    // Note - storing un-normalized
-    bs1_ = bs1;
-    bs2_ = bs2;
-    bs3_ = bs3;
-    bs4_ = bs4;
+    batchsize_ = 32;
+    std::array<size_t,4> max_ams;
+    size_t size=1.0;
 
+    for(size_t i=0; i<4; ++i)
+    {
+        //all_am returns std::set of AMs sorted by value, rbegin gives us highest
+        max_ams[i] = *bs_[i].all_am().rbegin();
+        size*=max_ams[i];
+    }
+    const size_t fullsize = size * batchsize_;
+    const size_t allwork_size_ = sizeof(double) * (fullsize * 2 + size);
+    const size_t simint_workmem = simint_ostei_workmem(deriv, maxam_);
+    sharedwork_ = (double *)SIMINT_ALLOC(simint_workmem);
+    allwork_ = (double *)SIMINT_ALLOC(allwork_size_);
+    source_full_ = allwork_ + fullsize;
+    tformbuf_full_ = allwork_ + 2*fullsize;
 
-    // determine work sizes
-    size_t maxsize1 = bs1_.max_property(n_cartesian_gaussian_for_shell_am);
-    size_t maxsize2 = bs2_.max_property(n_cartesian_gaussian_for_shell_am);
-    size_t maxsize3 = bs3_.max_property(n_cartesian_gaussian_for_shell_am);
-    size_t maxsize4 = bs4_.max_property(n_cartesian_gaussian_for_shell_am);
-    size_t transformwork_size = maxsize1*maxsize2*maxsize3*maxsize4;
-    
-    maxsize1 =  bs1_.max_property(n_cartesian_gaussian_in_shell);
-    maxsize2 =  bs2_.max_property(n_cartesian_gaussian_in_shell);
-    maxsize3 =  bs3_.max_property(n_cartesian_gaussian_in_shell);
-    maxsize4 =  bs4_.max_property(n_cartesian_gaussian_in_shell);
-    size_t sourcework_size = maxsize1*maxsize2*maxsize3*maxsize4;
+    // build plain shells
+    for(size_t i=0; i<4; ++i)
+    {
+        for(size_t j=0;j<i;++j)
+        {
+            if(bs_[i]==bs_[j])
+            {
+                shells_[i] = shells_[j];
+                break;
+            }
+        }
+        shells_[i] = create_shell_vec_(bs_[i]);
+    }
 
-    work_.resize(sourcework_size+transformwork_size);
-    sourcework_ = work_.data();
-    transformwork_ = sourcework_ + sourcework_size;   
+    const bool braket_same = (shells_[0] == shells_[2] &&
+                               shells_[1] == shells_[3]);
+
+    single_spairs_[0] = create_shell_pair_(*shells_[0],*shells_[1]);
+    single_spairs_[1] = braket_same ? single_spairs_[0] : create_shell_pair_(*shells_[2],*shells_[3]);
+
+//    blocks12_.clear();
+//    blocks34_.clear();
+
+//    // sort the basis set AM
+//    std::array<std::vector<std::vector<int>>,4> sorted_shells_;
+//    for(size_t i=0; i<4; ++i)
+//        sorted_shells_[i]=std::vector<std::vector<int>>(max_ams[i]+1);
+//    for(size_t i=0;i<4; ++i)
+//        for(const auto shelli : *shells_[i])
+//            sorted_shells_[i][shelli.am].push_back(j);
+
+//    // form pairs for the bra
+//    // these aren't batched
+
+//    for(int iam = 0; iam <= am1; iam++)
+//        for(int jam = 0; jam <= am2; jam++)
+//        {
+//            for(int ishell : sorted_shells1[iam])
+//                for(int jshell : sorted_shells2[jam])
+//                {
+//                    if(!bra_same_ || (bra_same_ && jshell <= ishell) )
+//                        blocks12_.push_back( {{ishell, jshell}} );
+//                }
+//        }
+
+//    // form pairs for the ket
+//    for(int iam = 0; iam <= am3; iam++)
+//        for(int jam = 0; jam <= am4; jam++)
+//        {
+//            ShellPairBlock curblock;
+
+//            for(int ishell : sorted_shells3[iam])
+//                for(int jshell : sorted_shells4[jam])
+//                {
+//                    if(!ket_same_ || (ket_same_ && jshell <= ishell) )
+//                    {
+//                        curblock.push_back({ishell, jshell});
+//                        if(curblock.size() == batchsize_)
+//                        {
+//                            blocks34_.push_back(curblock);
+//                            curblock.clear();
+//                        }
+//                    }
+//                }
+
+//            if(curblock.size())
+//                blocks34_.push_back(std::move(curblock));
+//        }
+
+//    multi_spairs_[0] = create_shared_multi_shellpair_(blocks12_, *shells_[0], *shells_[4]);
+//    multi_spairs_[1] = create_shared_multi_shellpair_(blocks34_, *shells_[2], *shells_[3]);
 }
 

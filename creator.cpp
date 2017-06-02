@@ -1,6 +1,6 @@
 #include "SimintERI.hpp"
 
-using pulsar::modulemanager::ModuleCreationFuncs;
+using pulsar::ModuleCreationFuncs;
 
 
 extern "C" {
