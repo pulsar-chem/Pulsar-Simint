@@ -1,8 +1,8 @@
-#ifndef _GUARD_SIMINTRI_HPP_
-#define _GUARD_SIMINTRI_HPP_
+#pragma once
 
 #include <pulsar/modulebase/FourCenterIntegral.hpp>
 #include <pulsar/system/BasisSet.hpp>
+#include "simint/simint.h"
 
 class SimintERI : public pulsar::FourCenterIntegral
 {
@@ -33,14 +33,20 @@ public:
     virtual double* calculate_(size_t shell1, size_t shell2,
                                size_t shell3, size_t shell4);
 
+    typedef std::vector<simint_multi_shellpair> ShellPairVec;
+    typedef std::vector<simint_shell> ShellVec;
+
 private:
-    pulsar::BasisSet bs1_, bs2_, bs3_, bs4_;
-    std::vector<double> buffer_;
-    std::vector<double> work_;
-    double * sourcework_;
-    double * transformwork_;
 
+
+    std::array<pulsar::BasisSet,4> bs_;
+    std::array<std::shared_ptr<const ShellVec>,4> shells_;
+    std::array<std::shared_ptr<const ShellPairVec>,2> single_spairs_;
+    std::array<std::shared_ptr<const ShellPairVec>,2> multi_spairs_;
+
+    double * buffer_;
+    double * sharedwork_;
+    double * allwork_;
+    double * source_full_;
+    double * tformbuf_full_;
 };
-
-
-#endif
